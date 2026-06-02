@@ -2,12 +2,51 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { PrismaClient } from '@prisma/client'
+import passport from 'passport'
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
+import jwt from 'jsonwebtoken'
+import cookieParser from 'cookie-parser'
 
 const app = express()
 const prisma = new PrismaClient()
 
-app.use(cors())
+app.use(cors({ origin: 'http://localhost:5173', credentials: true }))
 app.use(express.json())
+app.use(cookieParser())
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID') {
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    callbackURL: 'http://localhost:3000/api/auth/google/callback'
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      const email = profile.emails?.[0].value || ''
+      const name = profile.displayName || ''
+      const googleId = profile.id
+      
+      let user = await prisma.user.findUnique({ where: { email } })
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            email,
+            name,
+            googleId,
+            cardType: 'Standard'
+          }
+        })
+      } else if (!user.googleId) {
+        user = await prisma.user.update({
+          where: { email },
+          data: { googleId }
+        })
+      }
+      return done(null, user)
+    } catch (err: any) {
+      return done(err)
+    }
+  }))
+}
 
 // Create a mock user on start if it doesn't exist to simulate auth
 async function initSeed() {
@@ -94,14 +133,37 @@ app.patch('/api/orders/:id/status', async (req, res) => {
   }
 })
 
-// Auth Mock Endpoint
-app.post('/api/auth/google', async (req, res) => {
+// Google OAuth endpoints
+app.get('/api/auth/google', (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
+    return res.status(500).send('Google Auth is not configured. Please add GOOGLE_CLIENT_ID to server/.env')
+  }
+  passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next)
+})
+
+app.get('/api/auth/google/callback', passport.authenticate('google', { session: false }), (req, res) => {
+  const user: any = req.user
+  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'brandeazy_super_secret_key_123', { expiresIn: '7d' })
+  res.cookie('token', token, { httpOnly: true, secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 })
+  res.redirect('http://localhost:5173/admin')
+})
+
+app.get('/api/auth/logout', (req, res) => {
+  res.clearCookie('token')
+  res.json({ success: true })
+})
+
+app.get('/api/auth/me', async (req, res) => {
+  const token = req.cookies?.token
+  if (!token) return res.status(401).json({ error: 'Unauthorized' })
+  
   try {
-    // Return our seeded user
-    const user = await prisma.user.findFirst()
+    const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'brandeazy_super_secret_key_123')
+    const user = await prisma.user.findUnique({ where: { id: decoded.id } })
+    if (!user) return res.status(401).json({ error: 'User not found' })
     res.json(user)
-  } catch (error) {
-    res.status(500).json({ error: 'Authentication failed' })
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' })
   }
 })
 

@@ -22,7 +22,7 @@ export default function LoginPage() {
 
         <button 
           type="button"
-          onClick={() => navigate('/admin')}
+          onClick={() => window.location.href = 'http://localhost:3000/api/auth/google'}
           className="w-full bg-white text-black border border-outline-variant/30 py-4 rounded-xl font-label-sm uppercase tracking-widest hover:bg-gray-50 hover:shadow-md transition-all duration-300 flex items-center justify-center gap-3 relative z-10 cursor-pointer"
         >
           <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google logo" className="w-5 h-5" />

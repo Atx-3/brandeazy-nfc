@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+
+// Ensure cookies are sent with requests
+axios.defaults.withCredentials = true
 
 type OrderStatus = 'Order Placed' | 'Processing' | 'Laser Engraving' | 'Shipped' | 'Delivered'
 
@@ -24,32 +27,38 @@ interface User {
 }
 
 export default function AdminDashboard() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'orders' | 'users'>('orders')
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true)
   
   const [orders, setOrders] = useState<Order[]>([])
   const [users, setUsers] = useState<User[]>([])
 
-  const fetchOrders = async () => {
+  const fetchAuthAndData = async () => {
     try {
-      const res = await axios.get('http://localhost:3000/api/orders')
-      setOrders(res.data)
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  const fetchUsers = async () => {
-    try {
-      const res = await axios.get('http://localhost:3000/api/users')
-      setUsers(res.data)
-    } catch (e) {
-      console.error(e)
+      await axios.get('http://localhost:3000/api/auth/me')
+      // If successful, user is authenticated
+      setIsLoadingAuth(false)
+      
+      // Now fetch data
+      const [ordersRes, usersRes] = await Promise.all([
+        axios.get('http://localhost:3000/api/orders'),
+        axios.get('http://localhost:3000/api/users')
+      ])
+      setOrders(ordersRes.data)
+      setUsers(usersRes.data)
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        navigate('/login')
+      } else {
+        console.error(e)
+        setIsLoadingAuth(false)
+      }
     }
   }
 
   useEffect(() => {
-    fetchOrders()
-    fetchUsers()
+    fetchAuthAndData()
   }, [])
 
   const handleStatusChange = async (orderId: string, newStatus: OrderStatus) => {
@@ -59,6 +68,10 @@ export default function AdminDashboard() {
     } catch (e) {
       console.error(e)
     }
+  }
+
+  if (isLoadingAuth) {
+    return <div className="min-h-screen bg-surface flex items-center justify-center font-headline-lg text-primary">Loading...</div>
   }
 
   const allStatuses: OrderStatus[] = ['Order Placed', 'Processing', 'Laser Engraving', 'Shipped', 'Delivered']
@@ -87,10 +100,15 @@ export default function AdminDashboard() {
           </button>
         </div>
         <div className="p-4 border-t border-outline-variant/30">
-          <Link to="/" className="w-full flex items-center gap-3 px-4 py-3 rounded-lg font-label-sm uppercase tracking-widest text-error hover:bg-error-container/20 transition-colors">
+          <button onClick={async () => {
+            try {
+              await axios.get('http://localhost:3000/api/auth/logout')
+            } catch (e) {}
+            navigate('/login')
+          }} className="w-full flex items-center gap-3 px-4 py-3 rounded-lg font-label-sm uppercase tracking-widest text-error hover:bg-error-container/20 transition-colors cursor-pointer">
             <span className="material-symbols-outlined text-[20px]">logout</span>
             Sign Out
-          </Link>
+          </button>
         </div>
       </aside>
 
